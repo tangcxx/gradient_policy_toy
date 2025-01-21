@@ -58,8 +58,8 @@ def get_optimal_actions(state_list):
 def get_model_actions(model, state_list):
     return model(np.array(state_list)).numpy().argmax(axis = 1)
 
-def test_model(model, n_rounds):
-    state_list = np.array([make_state() for i in np.arange(n_rounds)])
+def test_model(model, n_test_rounds):
+    state_list = np.array([make_state() for i in np.arange(n_test_rounds)])
     actions = get_model_actions(model, state_list)
     values = [run(state, action) for state, action in zip(state_list, actions)]
     return np.mean(values)
@@ -79,13 +79,13 @@ def one_batch(model, batch_size, n_test_rounds=0):
     if n_test_rounds > 0:
         return (test_model(model, n_test_rounds))
 
-def test_model_accuracy(model, n_tests):
+def test_model_accuracy(model, n_test_rounds):
     count = 0
-    state_list = [make_state() for i in np.arange(n_tests)]
+    state_list = [make_state() for i in np.arange(n_test_rounds)]
     optimal_values = np.array([get_optimal_value(state) for state in state_list])
     model_actions = get_model_actions(model, state_list)
     model_values = np.array([run(state, action) for state, action in zip(state_list, model_actions)])
-    return np.sum(np.abs(optimal_values - model_values) < 1e-6)/n_tests
+    return np.sum(np.abs(optimal_values - model_values) < 1e-6)/n_test_rounds
 
 def one_batch_supervised(model, batch_size, n_test_rounds=0):
     state_list = []
