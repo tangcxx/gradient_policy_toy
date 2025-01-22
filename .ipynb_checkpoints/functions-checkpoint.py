@@ -5,129 +5,105 @@ from tensorflow.keras.layers import Input, Dense, BatchNormalization, ReLU, Drop
 from tensorflow.keras.models import Model, clone_model
 from itertools import product
 
-def make_state():
-    state = np.zeros(8)
-    state[np.random.choice(8, size=3, replace=False)] = np.random.uniform(size=3)
-    return state
-
+def make_states(n):
+    states = np.zeros((n,8))
+    for i in np.arange(n):
+        idx = np.random.choice(8, size=3, replace=False)
+        states[i, idx] = np.random.uniform(LOW, HIGH, size=3)
+    return states
+    
 def run(state, action):
-    state_cyclic = np.concatenate((state, state[0:2]))
-    if state_cyclic[action] != 0:
-        return state_cyclic[action]
-    elif state_cyclic[action-1] != 0 and state_cyclic[action+1] != 0:
-        return state_cyclic[action-1] + state_cyclic[action+1]
+    if state[action] != 0:
+        return state[action]
     else:
-        return 0
+        before, after = state[(action - 1) % 8], state[(action + 1) % 8]
+        if before != 0 and after != 0:
+            return before + after
+        else:
+            return 0
 
-def get_optimal_value(state):
-    value = state.max()
+def get_optimal_action_and_value(state):
+    values = np.array([run(state, action) for action in np.arange(8)])
+    optimal_action = values.argmax()
+    return optimal_action, values[optimal_action]
 
-    state_cyclic = np.concatenate((state, state[0:2]))
-    for i in np.arange(1, 9):
-        if state_cyclic[i] == 0 and state_cyclic[i-1] != 0 and state_cyclic[i+1] != 0:
-            value2 = state_cyclic[i-1] + state_cyclic[i+1]
-            if value2 > value:
-                value = value2
-    return value
-
+def get_optimal_actions_and_values(state_list):
+    res = [get_optimal_action_and_value(state) for state in state_list]
+    actions = np.array([pairs[0] for pairs in res])
+    values = np.array([pairs[1] for pairs in res])
+    return actions, values
+    
 def get_optimal_statics(n_rounds):
-    values = np.array([get_optimal_value(make_state()) for i in np.arange(n_rounds)])
+    state_list = make_states(n_rounds)
+    _, values = get_optimal_actions_and_values(state_list)
     return np.mean(values), np.std(values)
 
-def get_baseline_value(n_rounds):
-    values = [run(make_state(), np.random.choice(8)) for i in np.arange(n_rounds)]
-    return np.mean(values)
-    
-
-def get_optimal_action(state):
-    action = state.argmax()
-    value = state[action]
-    state_cyclic = np.concatenate((state, state[0:2]))
-    for i in np.arange(1, 9):
-        if state_cyclic[i] == 0 and state_cyclic[i-1] != 0 and state_cyclic[i+1] != 0:
-            value2 = state_cyclic[i-1] + state_cyclic[i+1]
-            if value2 > value:
-                value = value2
-                action = i % 8
-    return action
-
-def get_optimal_actions(state_list):
-    return np.array([get_optimal_action(state) for state in state_list])
-    
+def get_random_policy_statics(n_rounds):
+    values = [run(state, np.random.choice(8)) for state in make_states(n_rounds)]
+    return np.mean(values), np.std(values)
 
 def get_model_actions(model, state_list):
     return model(np.array(state_list)).numpy().argmax(axis = 1)
 
 def test_model(model, n_test_rounds):
-    state_list = np.array([make_state() for i in np.arange(n_test_rounds)])
+    state_list = make_states(n_test_rounds)
     actions = get_model_actions(model, state_list)
     values = [run(state, action) for state, action in zip(state_list, actions)]
-    return np.mean(values)
+    optimal_actions, _ = get_optimal_actions_and_values(state_list)
+    accuracy = np.mean(actions == optimal_actions)
+    return np.mean(values), np.std(values), accuracy
 
 def one_batch(model, batch_size, n_test_rounds=0):
-    y_target_list = []
-    state_list = np.array([make_state() for i in np.arange(batch_size)])
+    y_target_list = np.zeros((batch_size, 8))
+    state_list = make_states(batch_size)
     prob_list = model(np.array(state_list)).numpy()
-    actions = get_model_actions(model, state_list)
-    for i, prob in enumerate(prob_list):
-        y_target = np.zeros(8)
-        state = state_list[i]
-        action = np.random.choice(8, p=prob)
-        y_target[action] = run(state, action)
-        y_target_list.append(y_target)
-    model.fit(state_list, np.array(y_target_list), verbose = 0)
+    actions = np.array([np.random.choice(8, p=prob) for prob in prob_list])
+    values = np.array([run(state, action) for state, action in zip(state_list, actions)])
+    _, optimal_values = get_optimal_actions_and_values(state_list)
+    values = values - optimal_values
+    values = (values - np.mean(values)) / (np.std(values) + 1e-8)
+    for i in np.arange(batch_size):
+        y_target_list[i, actions[i]] = values[i]
+    model.fit(state_list, y_target_list, epochs=1, batch_size=batch_size, verbose = 0)
     if n_test_rounds > 0:
-        return (test_model(model, n_test_rounds))
-
-def test_model_accuracy(model, n_test_rounds):
-    count = 0
-    state_list = [make_state() for i in np.arange(n_test_rounds)]
-    optimal_values = np.array([get_optimal_value(state) for state in state_list])
-    model_actions = get_model_actions(model, state_list)
-    model_values = np.array([run(state, action) for state, action in zip(state_list, model_actions)])
-    return np.sum(np.abs(optimal_values - model_values) < 1e-6)/n_test_rounds
+        return test_model(model, n_test_rounds)
 
 def one_batch_supervised(model, batch_size, n_test_rounds=0):
-    state_list = []
-    y_target_list = []
-    # rewards = 0
+    state_list = make_states(batch_size)
+    y_target_list = np.zeros((batch_size, 8))
+    optimal_actions, _ = get_optimal_actions_and_values(state_list)
     for i in np.arange(batch_size):
-        state = make_state()
-        action = get_optimal_action(state)
-        y_target = np.zeros(8)
-        y_target[action] = 1
-        state_list.append(state)
-        y_target_list.append(y_target)
+        y_target_list[i, optimal_actions[i]] = 1
     model.fit(np.array(state_list), np.array(y_target_list), verbose=0)
     if n_test_rounds > 0:
-        return (test_model(model, n_test_rounds))
+        return test_model(model, n_test_rounds)
 
-def train(model, max_batch=200, batch_size=128, n_test_rounds=10000, verbose = 0):
+def train(one_batch, model, max_batch=200, batch_size=128, n_test_rounds=10000, verbose = 0):
     best_weights = []
     best_idx = 0
     best_score = 0
     for i in np.arange(max_batch):
-        score = one_batch(model, batch_size, n_test_rounds)
+        score, std, accuracy = one_batch(model, batch_size, n_test_rounds)
         if best_score < score:
             best_score = score
             best_idx = i
             best_weights = model.get_weights()
         if verbose == 1:
-            print(i, score)
+            print(i, score, accuracy)
     return best_idx, best_score, best_weights
 
-def train_supervised(model, max_batch=200, batch_size=128, n_test_rounds=10000, verbose = 0):
+def train_supervised(one_batch_supervised, model, max_batch=200, batch_size=128, n_test_rounds=10000, verbose = 0):
     best_weights = []
     best_idx = 0
     best_score = 0
     for i in np.arange(max_batch):
-        score = one_batch_supervised(model, batch_size, n_test_rounds)
+        score, std, accuracy = one_batch_supervised(model, batch_size, n_test_rounds)
         if best_score < score:
             best_score = score
             best_idx = i
             best_weights = model.get_weights()
         if verbose == 1:
-            print(i, score)
+            print(i, score, accuracy)
     return best_idx, best_score, best_weights
 
 
