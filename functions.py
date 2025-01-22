@@ -9,7 +9,7 @@ def make_states(n):
     states = np.zeros((n,8))
     for i in np.arange(n):
         idx = np.random.choice(8, size=3, replace=False)
-        states[i, idx] = np.random.uniform(LOW, HIGH, size=3)
+        states[i, idx] = np.random.uniform(0.0, 1.0, size=3)
     return states
     
 def run(state, action):
@@ -53,7 +53,7 @@ def test_model(model, n_test_rounds):
     accuracy = np.mean(actions == optimal_actions)
     return np.mean(values), np.std(values), accuracy
 
-def one_batch(model, batch_size, n_test_rounds=0):
+def one_batch(model, optimizer, batch_size, n_test_rounds=0):
     y_target_list = np.zeros((batch_size, 8))
     state_list = make_states(batch_size)
     prob_list = model(np.array(state_list)).numpy()
@@ -68,22 +68,22 @@ def one_batch(model, batch_size, n_test_rounds=0):
     if n_test_rounds > 0:
         return test_model(model, n_test_rounds)
 
-def one_batch_supervised(model, batch_size, n_test_rounds=0):
-    state_list = make_states(batch_size)
-    y_target_list = np.zeros((batch_size, 8))
-    optimal_actions, _ = get_optimal_actions_and_values(state_list)
-    for i in np.arange(batch_size):
-        y_target_list[i, optimal_actions[i]] = 1
-    model.fit(np.array(state_list), np.array(y_target_list), verbose=0)
-    if n_test_rounds > 0:
-        return test_model(model, n_test_rounds)
+# def one_batch_supervised(model, batch_size, n_test_rounds=0):
+#     state_list = make_states(batch_size)
+#     y_target_list = np.zeros((batch_size, 8))
+#     optimal_actions, _ = get_optimal_actions_and_values(state_list)
+#     for i in np.arange(batch_size):
+#         y_target_list[i, optimal_actions[i]] = 1
+#     model.fit(np.array(state_list), np.array(y_target_list), verbose=0)
+#     if n_test_rounds > 0:
+#         return test_model(model, n_test_rounds)
 
-def train(one_batch, model, max_batch=200, batch_size=128, n_test_rounds=10000, verbose = 0):
+def train(one_batch, optimizer, model, max_batch=200, batch_size=128, n_test_rounds=10000, verbose = 0):
     best_weights = []
     best_idx = 0
     best_score = 0
     for i in np.arange(max_batch):
-        score, std, accuracy = one_batch(model, batch_size, n_test_rounds)
+        score, std, accuracy = one_batch(model, optimizer, batch_size, n_test_rounds)
         if best_score < score:
             best_score = score
             best_idx = i
@@ -92,22 +92,22 @@ def train(one_batch, model, max_batch=200, batch_size=128, n_test_rounds=10000, 
             print(i, score, accuracy)
     return best_idx, best_score, best_weights
 
-def train_supervised(one_batch_supervised, model, max_batch=200, batch_size=128, n_test_rounds=10000, verbose = 0):
-    best_weights = []
-    best_idx = 0
-    best_score = 0
-    for i in np.arange(max_batch):
-        score, std, accuracy = one_batch_supervised(model, batch_size, n_test_rounds)
-        if best_score < score:
-            best_score = score
-            best_idx = i
-            best_weights = model.get_weights()
-        if verbose == 1:
-            print(i, score, accuracy)
-    return best_idx, best_score, best_weights
+# def train_supervised(one_batch_supervised, model, max_batch=200, batch_size=128, n_test_rounds=10000, verbose = 0):
+#     best_weights = []
+#     best_idx = 0
+#     best_score = 0
+#     for i in np.arange(max_batch):
+#         score, std, accuracy = one_batch_supervised(model, batch_size, n_test_rounds)
+#         if best_score < score:
+#             best_score = score
+#             best_idx = i
+#             best_weights = model.get_weights()
+#         if verbose == 1:
+#             print(i, score, accuracy)
+#     return best_idx, best_score, best_weights
 
 
-def create_model(n_hidden_layers, n_dense_units, ratio_dropout, optimizer):
+def create_model(n_hidden_layers, n_dense_units, ratio_dropout):
     input_shape = (8,) 
     inputs = Input(shape=input_shape)
 
@@ -120,6 +120,4 @@ def create_model(n_hidden_layers, n_dense_units, ratio_dropout, optimizer):
     
     outputs = Dense(8, activation='softmax')(x)
     model = Model(inputs, outputs)
-    model.compile(optimizer=optimizer, 
-                  loss='categorical_crossentropy')
     return model
