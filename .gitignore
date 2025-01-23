@@ -1,5 +1,4 @@
 *.hdf5
-*.ipynb
 *.swp
 /.ipynb_checkpoints/
 /__pycache__/
